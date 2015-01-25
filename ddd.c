@@ -137,7 +137,7 @@ main(int argc, char **argv)
 	}
 
 	if (lseek(fd, pos, SEEK_SET) < 0)
-	    printf("lseek failed @%ld\n", pos);
+	    printf("lseek failed @%lld\n", (long long)pos);
 
 	act = read(fd, buf, rsize);
 //	act = rsize;
@@ -159,7 +159,7 @@ main(int argc, char **argv)
 	}
 
 	/* must be a bad block, see if we can narrow it down */
-	printf("Bad 64K block @%ld\n", pos);
+	printf("Bad 64K block @%lld\n", (long long)pos);
 	printf("fd %d buf %p rsize %d act %d\n", fd, buf, rsize, act);
 	perror("read");
 
@@ -168,7 +168,7 @@ main(int argc, char **argv)
 	    for (i = 0; i < rsize / 512; i++)
 	    {
 		if (lseek(fd, pos, SEEK_SET) < 0)
-		    printf("lseek failed @%ld\n", pos);
+		    printf("lseek failed @%lld\n", (long long)pos);
 
 		act = read(fd, buf, 512);
 
@@ -182,7 +182,7 @@ main(int argc, char **argv)
 		}
 
 		/* we've narrowed down a bad block, report it */
-		printf("Bad 512 block @%ld\n", pos);
+		printf("Bad 512 block @%lld\n", (long long)pos);
 
 		/* now skip it */
 		pos += 512;
