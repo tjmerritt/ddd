@@ -2,4 +2,4 @@
 OBJS=		ddd.o
 
 ddd:		$(OBJS)
-	$(CC) $(CFLAGS) -o $@ $>
+	$(CC) $(CFLAGS) -o $@ $(OBJS)
