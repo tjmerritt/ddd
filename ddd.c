@@ -61,7 +61,7 @@ main(int argc, char **argv)
     unsigned char buf[64*1024];
     off_t pos = 0;
     off_t lastdot = 0;
-    off_t size = 0;
+    off_t size = -1;
     int errs = 0;
     int dots = 0;
     char *rdev;
@@ -90,12 +90,12 @@ main(int argc, char **argv)
     }
 
     if (argc != 2)
-	    usage();
+	usage();
 
     fd = open(argv[1], O_RDONLY);
 
     if (fd < 0)
-	    perror(argv[1]);
+	perror(argv[1]);
 
     dots = pos / (1024*1024);
     printtime(dots);
@@ -122,14 +122,17 @@ main(int argc, char **argv)
 
 	rsize = sizeof buf;
 
-	if (rsize > size)
-	    rsize = size;
+	if (size >= 0)
+	{
+	    if (rsize > size)
+		rsize = size;
 
-	if (rsize == 0)
-	    break;
+	    if (rsize == 0)
+		break;
+	}
 
 	if (lseek(fd, pos, SEEK_SET) < 0)
-		printf("lseek failed @%lld\n", pos);
+	    printf("lseek failed @%lld\n", pos);
 
 	act = read(fd, buf, rsize);
 //	act = rsize;
@@ -139,6 +142,12 @@ main(int argc, char **argv)
 
 	if (act > 0)
 	{
+	    if (act > rsize)
+	    {
+		printf("weird read gave too many bytes %d v. %d\n", act, rsize);
+		act = rsize;
+	    }
+
 	    pos += act;
 	    size -= act;
 	    continue;
@@ -146,6 +155,8 @@ main(int argc, char **argv)
 
 	/* must be a back block, see if we can narrow it down */
 	printf("Bad 64K block @%lld\n", pos);
+	printf("fd %d buf %p rsize %d act %d\n", fd, buf, rsize, act);
+	perror("read");
 
 	if (fflag)
 	{
@@ -183,6 +194,10 @@ main(int argc, char **argv)
     }
 
     printf("\n");
+
+    if ((dots % 50) != 0)
+	printtime(dots);
+
     close(fd);
     exit(errs ? 1 : 0);
 }
