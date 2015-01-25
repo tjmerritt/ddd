@@ -13,17 +13,17 @@ copy of the disk driver to extract any files that are extractable.
 Usage
 -----
 
-### Finding bad blocks
+Finding bad blocks:
 
-# ddd /dev/da0
+    # ddd /dev/da0
 
-### finding bad blocks on a portion of the disk
+finding bad blocks on a portion of the disk:
 
-# ddd /dev/da0 <staring block number> <number of blocks>
+    # ddd /dev/da0 <staring block number> <number of blocks>
 
-### Overwriting bad blocks with zeros
+Overwriting bad blocks with zeros:
 
-# ddd -f /dev/da0 <staring block number> <number of blocks>
+    # ddd -f /dev/da0 <staring block number> <number of blocks>
 
 History
 -------
