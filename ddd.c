@@ -1,41 +1,10 @@
 
-/*****************************************************************************
- *
- * Copyright (c) 2002, Thomas J. Merritt
- * All rights reserved.
- * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- * 
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- * 
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- * 
- * 3. Neither the name of the copyright holder nor the names of its contributors
- * may be used to endorse or promote products derived from this software without
- * specific prior written permission.
- * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
- */
-
-#include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <time.h>
 
 #include <sys/time.h>
 
@@ -53,7 +22,7 @@ printtime(int meg)
     timeval = tv.tv_sec;
     t = localtime(&timeval);
     printf("%02d:%02d:%02d.%06d %2d.%02dG ", t->tm_hour, t->tm_min, t->tm_sec,
-	    tv.tv_usec, gb, tgb);
+	    (int)tv.tv_usec, gb, tgb);
     fflush(stdout);
 }
 
@@ -99,6 +68,8 @@ main(int argc, char **argv)
     int dots = 0;
     char *rdev;
     int fflag = 0;
+
+    printf("sizeof (off_t) = %lu\n", sizeof (off_t));
 
     if (argc > 1 && strcmp(argv[1], "-f") == 0)
     {
@@ -165,7 +136,7 @@ main(int argc, char **argv)
 	}
 
 	if (lseek(fd, pos, SEEK_SET) < 0)
-	    printf("lseek failed @%lld\n", pos);
+	    printf("lseek failed @%ld\n", pos);
 
 	act = read(fd, buf, rsize);
 //	act = rsize;
@@ -186,8 +157,8 @@ main(int argc, char **argv)
 	    continue;
 	}
 
-	/* must be a back block, see if we can narrow it down */
-	printf("Bad 64K block @%lld\n", pos);
+	/* must be a bad block, see if we can narrow it down */
+	printf("Bad 64K block @%ld\n", pos);
 	printf("fd %d buf %p rsize %d act %d\n", fd, buf, rsize, act);
 	perror("read");
 
@@ -196,7 +167,7 @@ main(int argc, char **argv)
 	    for (i = 0; i < rsize / 512; i++)
 	    {
 		if (lseek(fd, pos, SEEK_SET) < 0)
-		    printf("lseek failed @%lld\n", pos);
+		    printf("lseek failed @%ld\n", pos);
 
 		act = read(fd, buf, 512);
 
@@ -210,7 +181,7 @@ main(int argc, char **argv)
 		}
 
 		/* we've narrowed down a bad block, report it */
-		printf("Bad 512 block @%lld\n", pos);
+		printf("Bad 512 block @%ld\n", pos);
 
 		/* now skip it */
 		pos += 512;
