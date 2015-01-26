@@ -1,7 +1,7 @@
 
 /*****************************************************************************
  *
- * Copyright (c) 2002, Thomas J. Merritt
+ * Copyright (c) 2002-2013, Thomas J. Merritt
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -224,7 +224,7 @@ main(int argc, char **argv)
 		act = read(fd, buf, 512);
 
 		if (act == 0)
-			break;
+		    break;
 
 		if (act > 0)
 		{
