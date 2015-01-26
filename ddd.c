@@ -86,7 +86,7 @@ getofft(char *s)
 void
 usage()
 {
-    fprintf(stderr, "Usage: ddd raw_device_file\n");
+    fprintf(stderr, "Usage: ddd [-f] [-o output] raw_device_file [start [size]]\n");
     exit(2);
 }
 
@@ -94,6 +94,7 @@ int
 main(int argc, char **argv)
 {
     int fd;
+    int outfd = -1;
     unsigned char buf[64*1024];
     off_t pos = 0;
     off_t lastdot = 0;
@@ -102,14 +103,27 @@ main(int argc, char **argv)
     int dots = 0;
     char *rdev;
     int fflag = 0;
-
-    printf("sizeof (off_t) = %lu\n", sizeof (off_t));
+    int badsectors = 0;
 
     if (argc > 1 && strcmp(argv[1], "-f") == 0)
     {
 	fflag = 1;
 	argc--;
 	argv++;
+    }
+
+    if (argc > 2 && strcmp(argv[1], "-o") == 0)
+    {
+	outfd = open(argv[2], O_WRONLY|O_CREAT, 0600);
+
+	if (outfd < 0)
+	{
+	    perror(argv[2]);
+	    exit(1);
+	}
+
+	argc -= 2;
+	argv += 2;
     }
 
     if (argc > 2)
@@ -188,6 +202,10 @@ main(int argc, char **argv)
 
 	    pos += act;
 	    size -= act;
+
+	    if (outfd >= 0 && write(outfd, buf, act) != act)
+		perror("write");
+
 	    continue;
 	}
 
@@ -210,6 +228,9 @@ main(int argc, char **argv)
 
 		if (act > 0)
 		{
+		    if (outfd >= 0 && write(outfd, buf, act) != act)
+			perror("write");
+
 		    pos += act;
 		    continue;
 		}
@@ -217,13 +238,32 @@ main(int argc, char **argv)
 		/* we've narrowed down a bad block, report it */
 		printf("Bad 512 block @%lld\n", (long long)pos);
 
+		if (outfd >= 0)
+		{
+		    /*  write zeros into the output file in its place */
+		    memset(buf, 0, 512);
+
+		    if (write(outfd, buf, 512) != 512)
+			perror("write");
+		}
+
 		/* now skip it */
 		pos += 512;
 		errs++;
+		badsectors++;
 	    }
 	}
 	else
 	{
+	    if (outfd >= 0)
+	    {
+		/*  write zeros into the output file in its place */
+		memset(buf, 0, rsize);
+
+		if (write(outfd, buf, rsize) != rsize)
+		    perror("write");
+	    }
+
 	    pos += rsize;
 	    errs++;
 	}
@@ -236,6 +276,15 @@ main(int argc, char **argv)
     if ((dots % 50) != 0)
 	printtime(dots);
 
+    printf("\n");
     close(fd);
+
+    if (outfd >= 0)
+	close(outfd);
+
+    if (badsectors > 0)
+	printf("Bad sectors: %d\n", badsectors);
+
     exit(errs ? 1 : 0);
 }
+
