@@ -1,7 +1,7 @@
 
 /*****************************************************************************
  *
- * Copyright (c) 2002-2013, Thomas J. Merritt
+ * Copyright (c) 2002-2017, Thomas J. Merritt
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,6 +41,16 @@
 #include <time.h>
 
 #include <sys/time.h>
+
+#define LGBLKSIZE      (64*1024)
+#define FSBLKSIZE      4096
+#define DSKBLKSIZE      512
+
+int errs = 0;
+int badsectors = 0;
+off_t skipped = 0;
+int fflag = 0;
+int zflag = 0;
 
 void
 printtime(int meg)
@@ -83,73 +93,147 @@ getofft(char *s)
     return x;
 }
 
-void
-usage()
+int
+writebuf(int outfd, off_t *off, off_t *skipped, unsigned char *buf, int len)
 {
-    fprintf(stderr, "Usage: ddd [-f] [-o output] raw_device_file [start [size]]\n");
-    exit(2);
+    if (outfd < 0 || off == NULL)
+        return 0;
+
+    if (zflag)
+        return write(outfd, buf, len);
+
+//    printf("off %lld, len %d\n", (long long)*off, len);
+
+    off_t x = *off;
+    int cnt = 0;
+
+    // align to multiple of block size
+    if ((x % FSBLKSIZE) != 0)
+    {
+        int l = FSBLKSIZE - (x % FSBLKSIZE);
+        printf("initial fragment, off %lld, len %d\n", x, l);
+
+        if (l > len)
+            l = len;
+
+        int n = write(outfd, buf, l);
+
+        if (n != l)
+        {
+            printf("write error: off %lld, len %d, ret %d\n", x, l, n);
+            return n;
+        }
+
+        buf += n;
+        x += n;
+        cnt += n;
+        len -= n;
+    }
+
+    int l = len;
+
+    while (l >= FSBLKSIZE)
+    {
+        int i;
+
+        for (i = 0; i < l; i++)
+            if (buf[i] != 0)
+                break;
+
+        if (i >= FSBLKSIZE)
+        {
+            int blks = i / FSBLKSIZE;
+            int n = blks * FSBLKSIZE;
+//            printf("Skipping %d blocks, %d bytes\n", blks, n);
+
+            // skip writing the zero blocks
+            buf += n;
+            x += n;
+            cnt += n;
+            l -= n;
+            *skipped += n;
+
+            off_t r = lseek(outfd, x, SEEK_SET);
+
+            if (r < 0)
+            {
+                printf("seek error: off %lld, ret %lld\n", x, r);
+                *off = x;
+                return cnt > 0 ? cnt : -1;
+            }
+
+            continue;
+        }
+
+        // find the next zero block
+        for (i = 0; i + FSBLKSIZE <= l; i += FSBLKSIZE)
+        {
+            int j = 0;
+
+            for (j = 0; j < FSBLKSIZE; j++)
+                if (buf[i + j] != 0)
+                    break;
+
+            if (j == FSBLKSIZE)
+                break;
+        }
+
+        if (i > 0)
+        {
+            int n = write(outfd, buf, i);
+
+            if (n != i)
+            {
+                printf("write error: off %lld, len %d, ret %d\n", x, i, n);
+
+                if (n > 0)
+                {
+                    x += n;
+                    cnt += n;
+                }
+
+                *off = x;
+                return cnt > 0 ? cnt : n;
+            }
+
+            buf += n;
+            x += n;
+            cnt += n;
+            l -= n;
+        }
+    }
+
+    if (l > 0)
+    {
+        printf("tail fragment, off %lld, len %d\n", x, l);
+
+        // l is less than a full block
+        int n = write(outfd, buf, l);
+
+        if (n != l)
+            printf("write error: off %lld, len %d, ret %d\n", x, l, n);
+
+        if (n > 0)
+        {
+            x += n;
+            cnt += n;
+        }
+
+        *off = x;
+        return cnt > 0 ? cnt : n;
+    }
+
+    *off = x;
+    return cnt;
 }
 
 int
-main(int argc, char **argv)
+ddd(int fd, int outfd, off_t pos, off_t size)
 {
-    int fd;
-    int outfd = -1;
-    unsigned char buf[64*1024];
-    off_t pos = 0;
+    off_t outoff = 0;
     off_t lastdot = 0;
-    off_t size = -1;
-    int errs = 0;
-    int dots = 0;
-    char *rdev;
-    int fflag = 0;
-    int badsectors = 0;
-
-    if (argc > 1 && strcmp(argv[1], "-f") == 0)
-    {
-	fflag = 1;
-	argc--;
-	argv++;
-    }
-
-    if (argc > 2 && strcmp(argv[1], "-o") == 0)
-    {
-	outfd = open(argv[2], O_WRONLY|O_CREAT, 0600);
-
-	if (outfd < 0)
-	{
-	    perror(argv[2]);
-	    exit(1);
-	}
-
-	argc -= 2;
-	argv += 2;
-    }
-
-    if (argc > 2)
-    {
-	pos = getofft(argv[1]);
-	lastdot = pos;
-	argc--;
-	argv++;
-
-	if (argc > 2)
-	{
-	    size = getofft(argv[1]);
-	    argc--;
-	    argv++;
-	}
-    }
-
-    if (argc != 2)
-	usage();
-
-    fd = open(argv[1], O_RDONLY);
-
-    if (fd < 0)
-	perror(argv[1]);
-
-    dots = pos / (1024*1024);
+    unsigned char buf[LGBLKSIZE];
+    int dots = pos / (1024*1024);
     printtime(dots);
 
     while (1)
@@ -203,32 +287,32 @@ main(int argc, char **argv)
 	    pos += act;
 	    size -= act;
 
-	    if (outfd >= 0 && write(outfd, buf, act) != act)
+	    if (writebuf(outfd, &outoff, &skipped, buf, act) != act)
 		perror("write");
 
 	    continue;
 	}
 
 	/* must be a bad block, see if we can narrow it down */
-	printf("Bad 64K block @%lld\n", (long long)pos);
+	printf("Bad %dK block @%lld\n", LGBLKSIZE / 1024, (long long)pos);
 	printf("fd %d buf %p rsize %d act %d\n", fd, buf, rsize, act);
 	perror("read");
 
 	if (fflag)
 	{
-	    for (i = 0; i < rsize / 512; i++)
+	    for (i = 0; i < rsize / DSKBLKSIZE; i++)
 	    {
 		if (lseek(fd, pos, SEEK_SET) < 0)
 		    printf("lseek failed @%lld\n", (long long)pos);
 
-		act = read(fd, buf, 512);
+		act = read(fd, buf, DSKBLKSIZE);
 
 		if (act == 0)
 		    break;
 
 		if (act > 0)
 		{
-		    if (outfd >= 0 && write(outfd, buf, act) != act)
+		    if (writebuf(outfd, &outoff, &skipped, buf, act) != act)
 			perror("write");
 
 		    pos += act;
@@ -236,19 +320,19 @@ main(int argc, char **argv)
 		}
 
 		/* we've narrowed down a bad block, report it */
-		printf("Bad 512 block @%lld\n", (long long)pos);
+		printf("Bad %d block @%lld\n", DSKBLKSIZE, (long long)pos);
 
 		if (outfd >= 0)
 		{
 		    /*  write zeros into the output file in its place */
-		    memset(buf, 0, 512);
+		    memset(buf, 0, DSKBLKSIZE);
 
-		    if (write(outfd, buf, 512) != 512)
+		    if (writebuf(outfd, &outoff, &skipped, buf, DSKBLKSIZE) != DSKBLKSIZE)
 			perror("write");
 		}
 
 		/* now skip it */
-		pos += 512;
+		pos += DSKBLKSIZE;
 		errs++;
 		badsectors++;
 	    }
@@ -260,7 +344,7 @@ main(int argc, char **argv)
 		/*  write zeros into the output file in its place */
 		memset(buf, 0, rsize);
 
-		if (write(outfd, buf, rsize) != rsize)
+		if (writebuf(outfd, &outoff, &skipped, buf, rsize) != rsize)
 		    perror("write");
 	    }
 
@@ -277,6 +361,74 @@ main(int argc, char **argv)
 	printtime(dots);
 
     printf("\n");
+    return 0;
+}
+
+void
+usage()
+{
+    fprintf(stderr, "Usage: ddd [-f] [-o output] raw_device_file [start [size]]\n");
+    exit(2);
+}
+
+int
+main(int argc, char **argv)
+{
+    int fd;
+    int outfd = -1;
+    char *outfile = NULL;
+    off_t pos = 0;
+    off_t size = -1;
+    char *rdev = NULL;
+    int ch;
+
+    while ((ch = getopt(argc, argv, "fo:")) != EOF)
+        switch (ch)
+        {
+        case 'f':
+            fflag = 1;
+            break;
+        case 'o':
+            outfile = optarg;
+            break;
+        case 'z':
+            zflag = 1;
+            break;
+        default:
+            usage();
+        }
+
+    if (outfile != NULL)
+    {
+	outfd = open(outfile, O_WRONLY|O_CREAT, 0600);
+
+	if (outfd < 0)
+	{
+	    perror(outfile);
+	    exit(1);
+	}
+    }
+
+    if (argc - optind < 1)
+	usage();
+
+    rdev = argv[optind];
+
+    if (argc - optind > 1)
+    {
+        pos = getofft(argv[optind + 1]);
+
+        if (argc - optind > 2)
+            size = getofft(argv[optind + 2]);
+    }
+
+    fd = open(rdev, O_RDONLY);
+
+    if (fd < 0)
+	perror(rdev);
+
+    ddd(fd, outfd, pos, size);
+
     close(fd);
 
     if (outfd >= 0)
@@ -284,6 +436,9 @@ main(int argc, char **argv)
 
     if (badsectors > 0)
 	printf("Bad sectors: %d\n", badsectors);
+
+    if (skipped > 0)
+        printf("Skipped %lldGB\n", skipped / (1024LL * 1024 * 1024));
 
     exit(errs ? 1 : 0);
 }
